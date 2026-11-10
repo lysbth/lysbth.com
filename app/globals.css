@@ -1,0 +1,42 @@
+@import 'tailwindcss';
+
+/* ---------- design tokens ----------
+ * Colours become utilities: bg-brick, text-paper, border-paper/45 …
+ * Fonts become font-px (Major Mono Display) and font-sans (Inter).
+ */
+@theme {
+  --color-bg: #0b0b0a;
+  --color-fg: #f3f1ec;
+  --color-paper: #f3f1ec;
+  --color-ink: #1d1d1b;
+  --color-brick: #d23a26; /* front of the card */
+  --color-cobalt: #2449b8; /* back of the card */
+  --color-muted: #8d8a83;
+
+  --font-px: var(--font-major-mono), 'Courier New', monospace;
+  --font-sans: var(--font-inter), 'Helvetica Neue', Helvetica, Arial, sans-serif;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    font-synthesis: none;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font: 400 15px/1.4 var(--font-px);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  /* the postcard is a <button>: strip the browser's button styling */
+  button.postcard {
+    all: unset;
+  }
+}

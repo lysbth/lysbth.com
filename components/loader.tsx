@@ -1,51 +1,57 @@
----
-import { MARK_PATH } from '../lib/mark';
----
+'use client';
 
-<div class="ld" id="ld" aria-hidden="true">
-  <canvas id="ldcv"></canvas>
-  <svg id="ldsvg" viewBox="0 0 1080 1080" preserveAspectRatio="none">
-    <path id="ldfill" fill="#1d1d1b" fill-opacity="0" d={MARK_PATH}></path>
-    <path class="lz" id="ldlz" pathLength="1" d={MARK_PATH}></path>
-  </svg>
-  <span class="skip lbl">click to skip</span>
-</div>
+import { useEffect, useRef, useState } from 'react';
+import { MARK_PATH } from '@/lib/mark';
 
-<script>
-  /*
-   * Opening animation: the construction grid of the mark draws in, the outline traces,
-   * the mark fills, then the view zooms into the lower stroke and reveals the postcard.
-   */
-  type Line = { ax: number; ay: number; bx: number; by: number; g: number; t: number; sx: number; sy: number; ex: number; ey: number };
+type Line = { ax: number; ay: number; bx: number; by: number; g: number; t: number; sx: number; sy: number; ex: number; ey: number };
 
-  const ld = document.getElementById('ld') as HTMLDivElement;
-  const svg = document.getElementById('ldsvg') as unknown as SVGSVGElement;
-  const outline = document.getElementById('ldlz') as unknown as SVGPathElement;
-  const fill = document.getElementById('ldfill') as unknown as SVGPathElement;
-  const canvas = document.getElementById('ldcv') as HTMLCanvasElement;
-  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+const INK = '#1d1d1b';
 
-  let done = false;
-  let raf = 0;
+/**
+ * Opening animation: the construction grid of the mark draws in, the outline traces,
+ * the mark fills, then the view zooms into the lower stroke and reveals the postcard.
+ * Drawn by hand on a canvas + SVG (frame by frame), so it does not use Motion.
+ */
+export function Loader({ onDone }: { onDone: () => void }) {
+  const [gone, setGone] = useState(false);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
-  function finish() {
-    if (done) return;
-    done = true;
-    cancelAnimationFrame(raf);
-    document.body.classList.remove('loading');
-    ld.style.transition = 'opacity .35s ease';
-    ld.style.opacity = '0';
-    setTimeout(() => ld.remove(), 380);
-  }
+  const ldRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const outlineRef = useRef<SVGPathElement>(null);
+  const fillRef = useRef<SVGPathElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    ld.remove();
-    document.body.classList.remove('loading');
-  } else {
-    run();
-  }
+  useEffect(() => {
+    const ld = ldRef.current!;
+    const svg = svgRef.current!;
+    const outline = outlineRef.current!;
+    const fill = fillRef.current!;
+    const canvas = canvasRef.current!;
+    const ctx = canvas.getContext('2d')!;
 
-  function run() {
+    let done = false;
+    let raf = 0;
+    const timers: number[] = [];
+
+    function finish() {
+      if (done) return;
+      done = true;
+      cancelAnimationFrame(raf);
+      onDoneRef.current();
+      ld.style.transition = 'opacity .35s ease';
+      ld.style.opacity = '0';
+      timers.push(window.setTimeout(() => setGone(true), 380));
+    }
+
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      done = true;
+      onDoneRef.current();
+      setGone(true);
+      return;
+    }
+
     scrollTo(0, 0);
 
     const outE = (p: number) => (p >= 1 ? 1 : 1 - Math.pow(2, -10 * p));
@@ -127,7 +133,7 @@ import { MARK_PATH } from '../lib/mark';
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
       if (fade <= 0) return;
-      ctx.strokeStyle = '#1d1d1b';
+      ctx.strokeStyle = INK;
       ctx.lineWidth = 1;
       for (const l of lines) {
         const t = el - l.t, k = inOutE(tw(t, 1150));
@@ -172,17 +178,53 @@ import { MARK_PATH } from '../lib/mark';
         if (z0 >= 1 || z > 0.985) {
           ld.style.background = '#0b0b0a';
           svg.style.opacity = '0';
-          setTimeout(finish, 60);
+          timers.push(window.setTimeout(finish, 60));
           return;
         }
       }
       raf = requestAnimationFrame(tick);
     }
 
+    const onResize = () => { if (!done && !zooming) setup(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') finish(); };
+
     setup();
     raf = requestAnimationFrame(tick);
-    addEventListener('resize', () => { if (!done && !zooming) setup(); });
+    addEventListener('resize', onResize);
+    addEventListener('keydown', onKey);
     ld.addEventListener('click', finish);
-    addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') finish(); });
-  }
-</script>
+
+    return () => {
+      cancelAnimationFrame(raf);
+      timers.forEach(clearTimeout);
+      removeEventListener('resize', onResize);
+      removeEventListener('keydown', onKey);
+      ld.removeEventListener('click', finish);
+    };
+  }, []);
+
+  if (gone) return null;
+
+  return (
+    <div ref={ldRef} className="loader fixed inset-0 z-200 cursor-pointer bg-fg motion-reduce:hidden" aria-hidden="true">
+      <canvas ref={canvasRef} className="absolute inset-0 block size-full" />
+      <svg ref={svgRef} className="absolute inset-0 block size-full" viewBox="0 0 1080 1080" preserveAspectRatio="none">
+        <path ref={fillRef} fill={INK} fillOpacity={0} d={MARK_PATH} />
+        <path
+          ref={outlineRef}
+          d={MARK_PATH}
+          pathLength={1}
+          fill={INK}
+          fillOpacity={0}
+          stroke={INK}
+          strokeWidth={4.4}
+          strokeDasharray={1}
+          strokeDashoffset={1}
+        />
+      </svg>
+      <span className="absolute right-[max(16px,env(safe-area-inset-right))] bottom-[calc(16px+env(safe-area-inset-bottom))] font-sans text-[11px] leading-[1.2] font-medium tracking-[.08em] text-ink uppercase opacity-50">
+        click to skip
+      </span>
+    </div>
+  );
+}
