@@ -1,0 +1,188 @@
+---
+import { MARK_PATH } from '../lib/mark';
+---
+
+<div class="ld" id="ld" aria-hidden="true">
+  <canvas id="ldcv"></canvas>
+  <svg id="ldsvg" viewBox="0 0 1080 1080" preserveAspectRatio="none">
+    <path id="ldfill" fill="#1d1d1b" fill-opacity="0" d={MARK_PATH}></path>
+    <path class="lz" id="ldlz" pathLength="1" d={MARK_PATH}></path>
+  </svg>
+  <span class="skip lbl">click to skip</span>
+</div>
+
+<script>
+  /*
+   * Opening animation: the construction grid of the mark draws in, the outline traces,
+   * the mark fills, then the view zooms into the lower stroke and reveals the postcard.
+   */
+  type Line = { ax: number; ay: number; bx: number; by: number; g: number; t: number; sx: number; sy: number; ex: number; ey: number };
+
+  const ld = document.getElementById('ld') as HTMLDivElement;
+  const svg = document.getElementById('ldsvg') as unknown as SVGSVGElement;
+  const outline = document.getElementById('ldlz') as unknown as SVGPathElement;
+  const fill = document.getElementById('ldfill') as unknown as SVGPathElement;
+  const canvas = document.getElementById('ldcv') as HTMLCanvasElement;
+  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+
+  let done = false;
+  let raf = 0;
+
+  function finish() {
+    if (done) return;
+    done = true;
+    cancelAnimationFrame(raf);
+    document.body.classList.remove('loading');
+    ld.style.transition = 'opacity .35s ease';
+    ld.style.opacity = '0';
+    setTimeout(() => ld.remove(), 380);
+  }
+
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    ld.remove();
+    document.body.classList.remove('loading');
+  } else {
+    run();
+  }
+
+  function run() {
+    scrollTo(0, 0);
+
+    const outE = (p: number) => (p >= 1 ? 1 : 1 - Math.pow(2, -10 * p));
+    const inOutE = (p: number) =>
+      p <= 0 ? 0 : p >= 1 ? 1 : p < 0.5 ? Math.pow(2, 20 * p - 10) / 2 : (2 - Math.pow(2, -20 * p + 10)) / 2;
+    const tw = (ms: number, d: number) => Math.max(0, Math.min(1, ms / d));
+
+    /* timeline (ms) */
+    const SPAN = 1050; // time over which the line groups start
+    const tO = 1450; // outline starts tracing
+    const tF = tO + 1050; // fill starts
+    const tZ = tF + 620; // zoom starts
+    const SL = 283.12 / 373.12; // slope of the diagonals in the logo grid
+
+    let W = 0, H = 0, u = 1, dpr = 1;
+    let vb0 = { x: 0, y: 0, w: 0, h: 0 };
+    let lines: Line[] = [];
+    let zooming = false;
+
+    function setup() {
+      /* never 0: a hidden tab can report a 0×0 viewport, which would make the viewBox NaN */
+      W = ld.clientWidth || innerWidth || 1;
+      H = ld.clientHeight || innerHeight || 1;
+      const S = Math.min(Math.min(W, H) * 0.56, 460);
+      u = S / 1080;
+      const w = W / u, h = H / u;
+      vb0 = { x: 540 - w / 2, y: 540 - h / 2, w, h };
+      dpr = Math.min(2, devicePixelRatio || 1);
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+
+      const x0 = vb0.x - 60, x1 = vb0.x + vb0.w + 60, y0 = vb0.y - 60, y1 = vb0.y + vb0.h + 60;
+      const hs: Line[] = [], ds: Line[] = [];
+      const blank = { t: 0, sx: 0, sy: 0, ex: 0, ey: 0 };
+
+      for (let n = Math.floor((y0 - 174.32) / 325.37) - 1; n <= Math.ceil((y1 - 174.32) / 325.37); n++) {
+        for (const o of [0, 24.32, 48.64]) {
+          const y = 174.32 + o + n * 325.37;
+          if (y > y0 && y < y1) hs.push({ ax: x0, ay: y, bx: x1, by: y, g: n, ...blank });
+        }
+      }
+      const mStart = Math.floor((x0 - (1249.54 - y0) * SL + 435.18) / 76.15) - 1;
+      for (let m = mStart; m < mStart + 400; m++) {
+        const xb = -435.18 + m * 76.15, xa = xb + (1249.54 - y1) * SL, xt = xb + (1249.54 - y0) * SL;
+        if (xt < x0) continue;
+        if (xa > x1) break;
+        ds.push({ ax: xt, ay: y0, bx: xa, by: y1, g: Math.floor(m / 3), ...blank });
+      }
+
+      /* start time per group: horizontals top to bottom, diagonals left to right, offset by half a step */
+      const sched = (list: Line[], half: boolean) => {
+        if (!list.length) return;
+        const g0 = list[0].g, n = Math.max(1, list[list.length - 1].g - g0), step = SPAN / (n + 0.5);
+        list.forEach((l) => (l.t = (l.g - g0) * step + (half ? step / 2 : 0)));
+      };
+      sched(hs, false);
+      sched(ds, true);
+
+      /* clip every line to the screen so the whole easing curve plays where you can see it */
+      lines = hs.concat(ds).filter((l) => {
+        const ax = (l.ax - vb0.x) * u, ay = (l.ay - vb0.y) * u;
+        const dx = (l.bx - vb0.x) * u - ax, dy = (l.by - vb0.y) * u - ay;
+        const P = [-dx, dx, -dy, dy], Q = [ax, W - ax, ay, H - ay];
+        let t0 = 0, t1 = 1;
+        for (let i = 0; i < 4; i++) {
+          if (P[i] === 0) { if (Q[i] < 0) return false; continue; }
+          const r = Q[i] / P[i];
+          if (P[i] < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+          else { if (r < t0) return false; if (r < t1) t1 = r; }
+        }
+        l.sx = ax + dx * t0; l.sy = ay + dy * t0; l.ex = ax + dx * t1; l.ey = ay + dy * t1;
+        return true;
+      });
+
+      if (!zooming) svg.setAttribute('viewBox', `${vb0.x} ${vb0.y} ${vb0.w} ${vb0.h}`);
+    }
+
+    function drawLines(el: number, fade: number) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      if (fade <= 0) return;
+      ctx.strokeStyle = '#1d1d1b';
+      ctx.lineWidth = 1;
+      for (const l of lines) {
+        const t = el - l.t, k = inOutE(tw(t, 1150));
+        if (k <= 0) continue;
+        ctx.globalAlpha = 0.12 * fade * outE(tw(t, 620));
+        ctx.beginPath();
+        ctx.moveTo(l.sx, l.sy);
+        ctx.lineTo(l.sx + (l.ex - l.sx) * k, l.sy + (l.ey - l.sy) * k);
+        ctx.stroke();
+      }
+    }
+
+    /* zoom target: the thickest point of the lower stroke of the mark */
+    const target = { x: 594, y: 590 };
+    const C0 = [29, 29, 27], C1 = [11, 11, 10];
+    const mix = (t: number) => `rgb(${C0.map((v, i) => Math.round(v + (C1[i] - v) * t)).join(',')})`;
+
+    const start = performance.now();
+    function tick(now: number) {
+      const el = now - start;
+      const o = outE(tw(el - tO, 1500));
+      const fr = outE(tw(el - tF, 950));
+      const z0 = tw(el - tZ, 1450);
+      const z = inOutE(z0);
+      const pop = z0 > 0 && z0 < 0.35 ? -Math.sin((z0 / 0.35) * Math.PI) * 0.07 : 0;
+
+      drawLines(el, 1 - Math.min(1, fr));
+      outline.style.strokeDashoffset = (1 - o).toFixed(4);
+      fill.style.fillOpacity = (el >= tF ? fr : 0).toFixed(3);
+
+      if (z0 > 0) {
+        zooming = true;
+        const c = mix(Math.min(1, z * 1.5));
+        outline.style.stroke = c;
+        fill.style.fill = c;
+        const K = Math.hypot(vb0.w, vb0.h) / 40;
+        const k = Math.exp(Math.log(K) * z) * (1 + pop);
+        const w = vb0.w / k, h = vb0.h / k;
+        const g = 1 - Math.pow(1 - Math.min(1, z * 1.6), 2);
+        const cx = 540 + (target.x - 540) * g, cy = 540 + (target.y - 540) * g;
+        svg.setAttribute('viewBox', `${cx - w / 2} ${cy - h / 2} ${w} ${h}`);
+        if (z0 >= 1 || z > 0.985) {
+          ld.style.background = '#0b0b0a';
+          svg.style.opacity = '0';
+          setTimeout(finish, 60);
+          return;
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    }
+
+    setup();
+    raf = requestAnimationFrame(tick);
+    addEventListener('resize', () => { if (!done && !zooming) setup(); });
+    ld.addEventListener('click', finish);
+    addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') finish(); });
+  }
+</script>

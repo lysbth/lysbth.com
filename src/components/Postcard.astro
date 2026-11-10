@@ -1,0 +1,87 @@
+---
+import Mark from './Mark.astro';
+
+interface Props {
+  domain: string;
+  message: string;
+  email: string;
+  tagline: string;
+}
+
+const { domain, message, email, tagline } = Astro.props;
+---
+
+<main class="card">
+  <div class="stage">
+    <button class="pc" id="pc" type="button" aria-pressed="false" aria-label="Postcard from lysbth, flip it over">
+      <span class="in">
+        <span class="face front">
+          <h1 id="fit"><span>{domain}</span></h1>
+          <span class="row">
+            <p>{message}</p>
+            <Mark class="mark" />
+          </span>
+        </span>
+        <span class="face back">
+          <span class="msg">
+            <h2>Let&rsquo;s connect</h2>
+            <span class="small">{tagline}</span>
+          </span>
+          <span class="rule"></span>
+          <span class="addr">
+            <span class="stamp"><Mark class="mark" /></span>
+            <span class="lines">
+              <a class="mail" id="mailfit" href={`mailto:${email}`}>{email}</a>
+              <i></i><i></i>
+            </span>
+          </span>
+        </span>
+      </span>
+    </button>
+    <span class="hint small" id="hint">click to flip</span>
+  </div>
+</main>
+
+<script>
+  /* Scale the domain and the email so they fill their space on the card. */
+  const heading = document.getElementById('fit') as HTMLElement;
+  const headingText = heading.firstElementChild as HTMLElement;
+  const front = heading.parentElement as HTMLElement;
+  const mail = document.getElementById('mailfit') as HTMLElement;
+  const addr = mail.closest('.addr') as HTMLElement;
+
+  function fit() {
+    const cs = getComputedStyle(front);
+    const avail = front.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    if (avail > 0) {
+      heading.style.fontSize = '100px';
+      const w = headingText.getBoundingClientRect().width;
+      if (w > 0) heading.style.fontSize = `${(100 * avail) / w}px`;
+    }
+    const aw = addr.clientWidth;
+    if (aw > 0) {
+      mail.style.fontSize = '100px';
+      const mw = mail.getBoundingClientRect().width;
+      if (mw > 0) mail.style.fontSize = `${((100 * aw) / mw) * 0.995}px`;
+    }
+  }
+
+  fit();
+  document.fonts?.ready.then(fit);
+  if ('ResizeObserver' in window) new ResizeObserver(fit).observe(front);
+  else addEventListener('resize', fit);
+
+  /* Flip the card. */
+  const card = document.getElementById('pc') as HTMLButtonElement;
+  const hint = document.getElementById('hint') as HTMLElement;
+  const touch = matchMedia('(hover: none)').matches;
+  const idle = touch ? 'tap to flip' : 'click to flip';
+  hint.textContent = idle;
+
+  card.addEventListener('click', (e) => {
+    if ((e.target as Element).closest('.mail')) return;
+    const on = card.getAttribute('aria-pressed') !== 'true';
+    card.setAttribute('aria-pressed', String(on));
+    hint.textContent = on ? 'flip back' : idle;
+  });
+</script>
