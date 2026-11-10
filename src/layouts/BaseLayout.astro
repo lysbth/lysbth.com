@@ -1,4 +1,5 @@
 ---
+import Analytics from '@vercel/analytics/astro';
 import '../styles/global.css';
 
 interface Props {
@@ -33,6 +34,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
       rel="stylesheet"
     />
     <noscript><style>.ld { display: none; } body.loading .stage { opacity: 1; transform: none; }</style></noscript>
+    <Analytics />
   </head>
   <body class="loading">
     <slot />
